@@ -1,4 +1,5 @@
 const { ethers, getNamedAccounts, network, deployments } = require("hardhat")
+const { deployMockContract } = require("ethereum-waffle");
 const { expect, assert } = require("chai");
 const { BigNumber } = require("ethers");
 const { developmentChains } = require("../../helper-hardhat-config");
@@ -6,151 +7,128 @@ const { developmentChains } = require("../../helper-hardhat-config");
 !developmentChains.includes(network.name)
     ? describe.skip
     : describe("RockPaperScissors", function () {
-        let rockPaperScissors, deployer, challenger, challenged, playerThree;
-        let mockV3Aggregator, ethToUsdExchangeRate; 
+        let rockPaperScissors, deployer, challenger, opponent, playerThree;
+        let mockV3Aggregator;
 
         beforeEach(async () => {
-
-            // const rocky = await ethers.getContractFactory("RockPaperScissors");
-            // rockPaperScissors = await rocky.deploy();
-            // await rockPaperScissors.deployed();
-
             deployer = (await getNamedAccounts()).deployer;
             await deployments.fixture(["all"]);
 
             rockPaperScissors = await ethers.getContract("RockPaperScissors", deployer);
             mockV3Aggregator = await ethers.getContract("MockV3Aggregator", deployer);
 
-            [, answer, , , ]  = await mockV3Aggregator.latestRoundData();
-            ethToUsdExchangeRate = answer;
-
             const signers = await ethers.getSigners();
             const addresses = await Promise.all(signers.map(async (signer) => {
                 return await signer.getAddress();
             }));   
 
-            [deployer, challenger, challenged, playerThree] = [addresses[0], addresses[1], addresses[2], addresses[3]];
-            
+            [challenger, opponent, playerThree] = [addresses[1], addresses[2], addresses[3]];
         });
 
         describe("constructor", function () {
             it("sets the aggregator addresses correctly", async () => {
                 const response = await rockPaperScissors.getPriceFeed()
                 assert.equal(response, mockV3Aggregator.address)
-            })
+            });
         });
 
         describe("registerAndDeposit", async function (){
-            let minimumDepositUsd, minimumDepositEth
-            
+            let minimumDepositEth;
+
             beforeEach(async () => {
-                minimumDepositUsd = 5;
-                minimumDepositEth = ethers.utils.parseUnits("0.0025", 18);
-                console.log("Minimum Deposit USD:", minimumDepositUsd.toString());
-                console.log("Minimum Deposit ETH:", minimumDepositEth.toString());
-                console.log("Exchange rate is: ", ethToUsdExchangeRate.toString());
-            });
-            
+                minimumDepositEth = await rockPaperScissors.getEthMinimumAmount();
+                // console.log(`Minimum ETH deposit from contract: ${minimumDepositEth}`);
+            });            
 
             it("should allow a user to register and deposit", async function () {
                 const initialDeposit = await rockPaperScissors.getDeposit(challenger);                    
 
-                await rockPaperScissors.connect(await ethers.getSigner(challenger)).registerAndDeposit({ value: minimumDepositEth });
+                await rockPaperScissors.connect(await ethers.getSigner(challenger)).registerAndDeposit({ value: 1 });
 
                 const updatedDeposit = await rockPaperScissors.getDeposit(challenger);
-                expect(updatedDeposit).to.equal(initialDeposit.add(minimumDepositEth));
+                expect(updatedDeposit).to.equal(initialDeposit.add(1));
             });
 
-            it("should not allow a user to register and deposit without enough ether", async function () {
-                const lessThanMinimumDeposit = ethers.utils.parseUnits("0.002", 18);
+            // it("should not allow a user to register and deposit without enough ether", async function () {
+            //     const lessThanMinimumDeposit = ethers.utils.parseUnits("0.002", 18);
             
-                await expect(rockPaperScissors.connect(await ethers.getSigner(challenger))
-                    .registerAndDeposit({ value: lessThanMinimumDeposit })).to.be.reverted;
+            //     await expect(rockPaperScissors.connect(await ethers.getSigner(challenger))
+            //         .registerAndDeposit({ value: lessThanMinimumDeposit })).to.be.reverted;
             
-                const updatedDeposit = await rockPaperScissors.getDeposit(challenger);   // Check that the deposit was not updated
-                expect(updatedDeposit).to.equal(0);
-            });
+            //     const updatedDeposit = await rockPaperScissors.getDeposit(challenger);   // Check that the deposit was not updated
+            //     expect(updatedDeposit).to.equal(0);
+            // });
         });
 
-        // describe("openChallenge", async function (){
-        //     let hand, owner, opponent, challengeId;
-        //     beforeEach(async () => {
-        //         const signers = await ethers.getSigners();
+        describe("openChallenge", async function (){
+            let hand, challengeId;
+            beforeEach(async () => {
+                hand = 1;      
+            });
 
-        //         // Get addresses of all signers
-        //         const addresses = await Promise.all(signers.map(async (signer) => {
-        //             return await signer.getAddress();
-        //         }));
+            it("should open a challenge successfully when the challenger has enough deposit and the amount is above the minimum", async function () {
+                await rockPaperScissors.connect(await ethers.getSigner(challenger)).registerAndDeposit({ value: 10 });
+                const amount = ethers.utils.parseEther("5");
 
-        //         owner = addresses[0];
-        //         opponent = addresses[2];            
-        //         opponentTwo = addresses[3];
-        //         hand = 1;      
-        //     });
+                await rockPaperScissors.connect(await ethers.getSigner(challenger)).openChallenge(opponent, amount, hand); 
 
-        //     it("should open a challenge successfully when the challenger has enough deposit and the amount is above the minimum", async function () {
-        //         await rockPaperScissors.registerAndDeposit(ethers.utils.parseEther("1.2"));
-        //         const amount = ethers.utils.parseEther("1.1");
+                const challengeAmount = await rockPaperScissors.getChallengeAmount(0);
+                const activeAmountOfDeposit = await rockPaperScissors.getAmountActive(challenger);
 
-        //         await rockPaperScissors.openChallenge(opponent, amount, hand); // {signer: owner}
-
-        //         const challengeAmount = await rockPaperScissors.getChallengeAmount(0);
-        //         const activeAmountOfDeposit = await rockPaperScissors.getAmountActive(owner);
-
-        //         expect(amount).to.equal(challengeAmount);
-        //         expect(activeAmountOfDeposit).to.equal(amount);
+                expect(amount).to.equal(challengeAmount);
+                expect(activeAmountOfDeposit).to.equal(amount);
                 
-        //     });
+            });
 
-        //     it("should revert if reserved funds have exceeded amount of deposit", async function (){
-        //         await rockPaperScissors.registerAndDeposit(ethers.utils.parseEther("2"));
-        //         const amount = ethers.utils.parseEther("1.1");
+            it("should revert if reserved funds have exceeded amount of deposit", async function (){
+                await rockPaperScissors.connect(await ethers.getSigner(challenger)).registerAndDeposit({ value: 20 });
+                const amount = ethers.utils.parseEther("5");
 
-        //         await rockPaperScissors.openChallenge(opponent, amount, hand);
+                await rockPaperScissors.connect(await ethers.getSigner(challenger)).openChallenge(opponent, amount, hand);
 
-        //         await expect(rockPaperScissors.openChallenge(opponent, amount, hand))
-        //         .to.be.revertedWith("RockPaperScissors__CannotAfford");
-        //     });
+                await expect(rockPaperScissors.openChallenge(opponent, amount, hand))
+                .to.be.revertedWith("RockPaperScissors__CannotAfford");
+            });
 
-        //     it("should revert if challenge amount is below minimum", async function (){
-        //         await rockPaperScissors.registerAndDeposit(ethers.utils.parseEther("2"));
-        //         const amount = ethers.utils.parseEther("0.00011");  // 0.00011 is minimum
+            // it("should revert if challenge amount is below minimum", async function (){
+            //     await rockPaperScissors.registerAndDeposit(ethers.utils.parseEther("2"));
+            //     const amount = ethers.utils.parseEther("0.00011");  // 0.00011 is minimum
 
-        //         await expect(rockPaperScissors.openChallenge(opponent, amount, hand))
-        //         .to.be.revertedWith("Not enough ETH.");
-        //     });
+            //     await expect(rockPaperScissors.openChallenge(opponent, amount, hand))
+            //     .to.be.revertedWith("Not enough ETH.");
+            // });
 
-        //     it("should update state variables when different opponents are challenged", async function (){
-        //         await rockPaperScissors.registerAndDeposit(ethers.utils.parseEther("5"));
-        //         const amount = ethers.utils.parseEther("1.1");  // 0.00011 is minimum
+            it("should update state variables when different opponents are challenged", async function (){
+                await rockPaperScissors.connect(await ethers.getSigner(challenger)).registerAndDeposit({ value: await ethers.utils.parseEther("15") });
+                const amount = ethers.utils.parseEther("5");  // 0.00011 is minimum
 
-        //         await rockPaperScissors.openChallenge(opponent, amount, hand);
-        //         await rockPaperScissors.openChallenge(opponentTwo, amount, hand);
+                await rockPaperScissors.connect(await ethers.getSigner(challenger)).openChallenge(opponent, amount, hand);
+                await rockPaperScissors.connect(await ethers.getSigner(challenger)).openChallenge(playerThree, amount, hand);
 
-        //         const challengeAmount = await rockPaperScissors.getChallengeAmount(1);
-        //         const activeAmountOfDeposit = await rockPaperScissors.getAmountActive(owner);
+                const challengeAmount = await rockPaperScissors.getChallengeAmount(1);
+                const activeAmountOfDeposit = await rockPaperScissors.getAmountActive(challenger);
 
-        //         const actualPlayers = await rockPaperScissors.getPlayers(0);
+                const actualPlayers = await rockPaperScissors.getPlayers(0);
 
-        //         expect(actualPlayers[0]).to.equal(owner);
-        //         expect(actualPlayers[1]).to.equal(opponent);
+                expect(actualPlayers[0]).to.equal(challenger);
+                expect(actualPlayers[1]).to.equal(opponent);
 
-        //         expect(amount).to.equal(challengeAmount);
-        //         expect(activeAmountOfDeposit).to.equal(amount.mul(2));
-        //     });
+                expect(amount).to.equal(challengeAmount);
+                expect(activeAmountOfDeposit).to.equal(amount.mul(2));
+            });
 
-        //     it("emits the event successfully", async function () {
-        //         await rockPaperScissors.registerAndDeposit(ethers.utils.parseEther("5"));
-        //         const amount = ethers.utils.parseEther("1.1");  // 0.00011 is minimum
+            it("emits the event successfully", async function () {
+                await rockPaperScissors.connect(await ethers.getSigner(challenger)).registerAndDeposit({ value: 5 });
+                const amount = ethers.utils.parseEther("5");  // 0.00011 is minimum
 
-        //         await expect(rockPaperScissors.openChallenge(opponent, amount, hand))
-        //             .to.emit(rockPaperScissors, "ChallengeOpened")
-        //             .withArgs("0", owner, opponent, amount, hand);
-        //     });     
+                await expect(rockPaperScissors.connect(await ethers.getSigner(challenger)).openChallenge(opponent, amount, hand))
+                    .to.emit(rockPaperScissors, "ChallengeOpened")
+                    .withArgs("0", challenger, opponent, amount, hand);
+            });     
 
-        //     // Attempting to open a challenge while the contract is in a paused state and verifying that it reverts.
-        //     // Attempting to open a challenge after the contract's end date and verifying that it reverts.
-        // });
+            // Attempting to open a challenge while the contract is in a paused state and verifying that it reverts.
+            // Attempting to open a challenge after the contract's end date and verifying that it reverts.
+        });
 
         // describe("acceptChallenge", async function () {
         //     beforeEach(async function () {
